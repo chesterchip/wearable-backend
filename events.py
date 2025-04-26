@@ -1,55 +1,49 @@
+# events.py
 from datetime import datetime, timedelta
 
-# Raw timeline entries with relative hour offsets and descriptions
-events_timeline = [
-    {"hour_offset": -24, "type": "meal",     "desc": "Breakfast"},
-    {"hour_offset": -20, "type": "exercise", "desc": "Morning Run"},
-    {"hour_offset": -18, "type": "coffee",   "desc": "Coffee"},
-    {"hour_offset": -12, "type": "meal",     "desc": "Lunch"},
-    {"hour_offset": -8,  "type": "exercise", "desc": "Afternoon Gym"},
-    {"hour_offset": -6,  "type": "caffeine", "desc": "Afternoon Coffee"},
-    {"hour_offset": -4,  "type": "meal",     "desc": "Dinner"},
-    {"hour_offset": -2,  "type": "sleep",    "desc": "Night Sleep"},
+now = datetime.utcnow()
+# relative offsets for demo
+events = [
+    {
+      "desc": "Breakfast",
+      "category": "Eating & Drinking",
+      "color": "#4caf50",
+      "start": (now - timedelta(hours=22)).isoformat()+"Z",
+      "end":   (now - timedelta(hours=21, minutes=30)).isoformat()+"Z",
+    },
+    {
+      "desc": "Morning Run",
+      "category": "Exercise",
+      "color": "#ff9800",
+      "start": (now - timedelta(hours=18)).isoformat()+"Z",
+      "end":   (now - timedelta(hours=17, minutes=30)).isoformat()+"Z",
+    },
+    {
+      "desc": "Coffee",
+      "category": "Caffeine",
+      "color": "#795548",
+      "start": (now - timedelta(hours=16)).isoformat()+"Z",
+      "end":   (now - timedelta(hours=15, minutes=50)).isoformat()+"Z",
+    },
+    {
+      "desc": "Lunch",
+      "category": "Eating & Drinking",
+      "color": "#f44336",
+      "start": (now - timedelta(hours=12)).isoformat()+"Z",
+      "end":   (now - timedelta(hours=11, minutes=30)).isoformat()+"Z",
+    },
+    {
+      "desc": "Afternoon Gym",
+      "category": "Exercise",
+      "color": "#9c27b0",
+      "start": (now - timedelta(hours=8)).isoformat()+"Z",
+      "end":   (now - timedelta(hours=7, minutes=0)).isoformat()+"Z",
+    },
+    {
+      "desc": "Night Sleep",
+      "category": "Sleep",
+      "color": "#3f51b5",
+      "start": (now - timedelta(hours=2)).isoformat()+"Z",
+      "end":   (now + timedelta(hours=6)).isoformat()+"Z",
+    }
 ]
-
-# Recommended durations per event type
-_EVENT_DURATIONS = {
-    "meal":     timedelta(hours=1, minutes=30),
-    "exercise": timedelta(hours=1),
-    "coffee":   timedelta(minutes=30),
-    "caffeine": timedelta(minutes=30),
-    "sleep":    timedelta(hours=8),
-}
-
-# Color mapping by description
-_COLOR_MAP = {
-    "Breakfast":      "#ffcc80",
-    "Morning Run":    "#ff9800",
-    "Coffee":         "#bcaaa4",
-    "Lunch":          "#a5d6a7",
-    "Afternoon Gym":  "#4caf50",
-    "Afternoon Coffee":"#9fa8da",
-    "Dinner":         "#795548",
-    "Night Sleep":    "#9fa8da",
-}
-
-def build_event_list():
-    """
-    Convert events_timeline entries into absolute start/end
-    timestamps (ms since epoch), with category, desc, and color.
-    """
-    now = datetime.utcnow()
-    out = []
-    for e in events_timeline:
-        start = now + timedelta(hours=e["hour_offset"])
-        duration = _EVENT_DURATIONS.get(e["type"], timedelta(hours=1))
-        end = start + duration
-
-        out.append({
-            "start":    int(start.timestamp() * 1000),
-            "end":      int(end.timestamp()   * 1000),
-            "category": e["desc"],
-            "desc":     e["desc"],
-            "color":    _COLOR_MAP.get(e["desc"], "#90a4ae"),
-        })
-    return out
