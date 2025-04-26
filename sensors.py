@@ -1,101 +1,78 @@
 # sensors.py
 import random
 from datetime import datetime, timedelta
-from collections import deque
 
-# Event definitions
-events_timeline = [
-    {"type": "meal",    "desc": "Breakfast",  "start": -2,  "duration": 30},  # hours ago, minutes
-    {"type": "coffee",  "desc": "Coffee",    "start": -3,  "duration": 15},
-    {"type": "exercise","desc": "Gym",       "start": -20, "duration": 60},
-    {"type": "sleep",   "desc": "Night Sleep","start": -13, "duration": 480},
-    {"type": "meal",    "desc": "Lunch",      "start": -24,"duration": 45},
-    {"type": "exercise","desc": "Walk",      "start": -16,"duration": 30},
-    {"type": "meal",    "desc": "Dinner",     "start": -18,"duration": 60},
-]
-
-def _event_active(now, event):
-    # computes minutes since event started: negative if in future
-    start_time = now + timedelta(hours=event['start'])
-    end_time = start_time + timedelta(minutes=event['duration'])
-    return start_time <= now <= end_time
-
-# baseline and state
+# baseline values
 BASELINE = {
-    'glucose': 90,
-    'lactate': 1.0,
-    'heart_rate': 65,
-    'skin_temp': 34.5,
-    'gsr': 2.5,
+    "glucose_mg_dL": 90,
+    "lactate_mmol_L": 1.0,
+    "heart_rate_BPM": 65,
+    "skin_temp_C": 34.5,
+    "GSR_uS": 2.5,
 }
-# keep last 5 values for simple smoothing
-_history = {k: deque([v]*5, maxlen=5) for k,v in BASELINE.items()}
 
-# produce 24h history buffer
+# stored history
 historical_data = []
+# persistent state
+current = BASELINE.copy()
+
+def smooth(val, target, rate):
+    return val + (target - val) * rate
+
+def decay_toward_baseline():
+    rates = {
+        "glucose_mg_dL": 0.002,
+        "lactate_mmol_L": 0.01,
+        "heart_rate_BPM": 0.01,
+        "skin_temp_C": 0.005,
+        "GSR_uS": 0.01,
+    }
+    for k, base in BASELINE.items():
+        current[k] = smooth(current[k], base, rates[k])
 
 def generate_sensor_data(timestamp=None):
-    now = datetime.utcnow()
-    if timestamp is None:
-        timestamp = now.isoformat() + 'Z'
-        ts = now
+    if not timestamp:
+        timestamp = datetime.utcnow()
     else:
-        ts = datetime.fromisoformat(timestamp.replace('Z',''))
+        # parse iso string
+        timestamp = datetime.fromisoformat(timestamp.rstrip("Z"))
 
-    state = {}
-    # simulate each sensor with event effects + decay + smoothing
-    # glucose: rises after meals
-    g = BASELINE['glucose']
-    for ev in events_timeline:
-        if _event_active(ts, ev) and ev['type']=='meal':
-            g += 30
-    # gradual decay
-    g = g - (now - ts).total_seconds()/3600*5
-    _history['glucose'].append(g)
-    state['glucose'] = sum(_history['glucose'])/len(_history['glucose'])
+    # apply slow decay
+    decay_toward_baseline()
 
-    # lactate: spikes during exercise
-    l = BASELINE['lactate']
-    for ev in events_timeline:
-        if _event_active(ts, ev) and ev['type']=='exercise':
-            l += 2
-    _history['lactate'].append(l)
-    state['lactate'] = sum(_history['lactate'])/len(_history['lactate'])
+    # tiny random walk
+    for k in current:
+        step = {"glucose_mg_dL":1.0,"lactate_mmol_L":0.02,"heart_rate_BPM":1.0,
+                "skin_temp_C":0.02,"GSR_uS":0.05}[k]
+        current[k] += random.uniform(-step, step)
+        # clamp
+        if k == "glucose_mg_dL":
+            current[k] = max(70, min(150, current[k]))
+        if k == "lactate_mmol_L":
+            current[k] = max(0.5, min(5.0, current[k]))
+        if k == "heart_rate_BPM":
+            current[k] = max(45, min(120, current[k]))
+        if k == "skin_temp_C":
+            current[k] = max(33, min(37, current[k]))
+        if k == "GSR_uS":
+            current[k] = max(1.0, min(6.0, current[k]))
 
-    # heart rate: increases with exercise and caffeine
-    hr = BASELINE['heart_rate']
-    for ev in events_timeline:
-        if _event_active(ts, ev) and ev['type'] in ('exercise','coffee'):
-            hr += 20
-    _history['heart_rate'].append(hr)
-    state['heart_rate'] = sum(_history['heart_rate'])/len(_history['heart_rate'])
-
-    # skin temp: slight rise with exercise
-    st = BASELINE['skin_temp']
-    for ev in events_timeline:
-        if _event_active(ts, ev) and ev['type']=='exercise':
-            st += 0.5
-    _history['skin_temp'].append(st)
-    state['skin_temp'] = sum(_history['skin_temp'])/len(_history['skin_temp'])
-
-    # GSR: changes with caffeine and stress events
-    gsr = BASELINE['gsr']
-    for ev in events_timeline:
-        if _event_active(ts, ev) and ev['type']=='coffee':
-            gsr += 1
-    _history['gsr'].append(gsr)
-    state['gsr'] = sum(_history['gsr'])/len(_history['gsr'])
-
-    # package
-    return {
-        'timestamp': timestamp,
-        'sensor': state,
-        'active_events': [ev['desc'] for ev in events_timeline if _event_active(ts, ev)]
+    point = {
+        "timestamp": timestamp.isoformat() + "Z",
+        "sensor": {
+            "glucose":    round(current["glucose_mg_dL"], 1),
+            "lactate":    round(current["lactate_mmol_L"], 2),
+            "heart_rate": round(current["heart_rate_BPM"], 1),
+            "skin_temp":  round(current["skin_temp_C"], 2),
+            "gsr":        round(current["GSR_uS"], 2),
+        }
     }
+    return point
 
-# initialize historical_data
-ts0 = datetime.utcnow() - timedelta(hours=24)
-for i in range(int(24*60/5)):
-    ts = ts0 + timedelta(minutes=5*i)
-    data = generate_sensor_data(ts.isoformat()+'Z')
-    historical_data.append(data)
+def generate_historical_data():
+    historical_data.clear()
+    # start 24h ago, step by 5s
+    t = datetime.utcnow() - timedelta(hours=24)
+    for _ in range(17280):
+        historical_data.append(generate_sensor_data(t.isoformat()+"Z"))
+        t += timedelta(seconds=5)
