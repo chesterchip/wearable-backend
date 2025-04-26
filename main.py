@@ -1,51 +1,48 @@
 # main.py
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import asyncio
-from datetime import datetime, timedelta
 
-from sensors import generate_sensor_data, historical_data, events_timeline
-from events import build_event_list
+from sensors import historical_data, generate_sensor_data, generate_historical_data
+from events import events
 
 app = FastAPI()
 
+@app.on_event("startup")
+async def startup_event():
+    # build 24h of history on startup
+    generate_historical_data()
+
 @app.get("/")
 async def root():
-    return {"status": "Wearable backend running with 24h history + events!"}
+    return {"status": "Wearable backend running with 24h history!"}
 
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
-    await ws.accept()
-    print("▶ Client connected")
-
-    # Build your events list (with ISO‐strings inside build_event_list)
-    events_list = build_event_list()
-
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
     try:
-        # Send BOTH your 24h of samples and the event blocks in one payload:
-        await ws.send_json({
-            "type":   "historical",
-            "data":   historical_data,
-            "events": events_list
+        # send the full 24h history once
+        await websocket.send_json({
+            "type": "historical",
+            "data": historical_data,
+            "events": events,               # include your events here too
         })
 
-        # Now stream live samples forever
+        # then stream live updates
         while True:
-            # <-- NOTE: no timestamp argument! sensors.generate_sensor_data()  
-            # will create its own ISO‐string timestamp internally.
-            new_data = generate_sensor_data()
-            historical_data.append(new_data)
-
-            # keep 24h of data
+            new_point = generate_sensor_data()
+            historical_data.append(new_point)
+            # keep exactly 24h (if you generate every 5s, that's ~17k points)
             if len(historical_data) > 17280:
                 historical_data.pop(0)
 
-            await ws.send_json({"type": "live", "data": new_data})
+            await websocket.send_json({
+                "type": "live",
+                "data": new_point,
+                "active_events": [
+                    e for e in events
+                    if e["start"] <= new_point["timestamp"] <= e["end"]
+                ]
+            })
             await asyncio.sleep(5)
-
     except WebSocketDisconnect:
-        print("⏹ Client disconnected cleanly")
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        print("⚠️ WebSocket error:", e)
-    finally:
-        print("🔥 WebSocket handler done")
+        print("Client disconnected.")
