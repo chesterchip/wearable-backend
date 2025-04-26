@@ -1,92 +1,129 @@
-import random
+# backend/sensors.py
+import random, math
 from datetime import datetime, timedelta
 
-initial_drink_time = datetime.utcnow() - timedelta(hours=7)
-initial_BAC = 0.16  # initial heavy drinking BAC peak
+# 1) a simple circadian‐rhythm modifier
+def circadian_modulation(ts: datetime):
+    # ts.hour → seconds since midnight
+    secs = ts.hour*3600 + ts.minute*60 + ts.second
+    phase = (secs / 86400.0) * 2*math.pi
+    # body temp swings ±0.5°C, lowest ~4 AM, highest ~4 PM
+    temp_mod = 0.5 * math.sin(phase - math.pi/2)
+    # heart rate swings ±5 BPM, peak midday
+    hr_mod = 5 * math.sin(phase)
+    return temp_mod, hr_mod
 
-sensor_state = {
-    "glucose_mg_dL": 92,
-    "lactate_mmol_L": 1.1,
-    "ketones_mmol_L": 0.2,
-    "proteins_g_dL": 7.1,
-    "urea_mg_dL": 15,
-    "heart_rate_BPM": 72,
-    "skin_temp_C": 34.7,
-    "ambient_temp_C": 22.0,
-    "humidity_pct": 40,
-    "pressure_hPa": 1013,
-    "GSR_uS": 3.5,
+# 2) your event timeline, now recorded as absolute datetimes
+raw_events = [
+    {"hour_offset": -20, "type": "meal",      "desc": "Lunch"},
+    {"hour_offset": -18, "type": "exercise",  "desc": "Yoga/Gym"},
+    {"hour_offset": -16, "type": "meal",      "desc": "Dinner"},
+    {"hour_offset": -14, "type": "exercise",  "desc": "Evening Walk"},
+    {"hour_offset": -12, "type": "sleep",     "desc": "Light Sleep"},  # will nest deeper
+    {"hour_offset": -8,  "type": "sleep_deep","desc": "Deep Sleep"},
+    {"hour_offset": -6,  "type": "sleep_rem", "desc": "REM Sleep"},
+    {"hour_offset": -5,  "type": "meal",      "desc": "Breakfast"},
+    {"hour_offset": -4,  "type": "caffeine",  "desc": "Coffee"},
+]
+# convert into absolute datetimes at module load
+now = datetime.utcnow()
+events = []
+for e in raw_events:
+    start = now + timedelta(hours=e["hour_offset"])
+    # assume fixed durations
+    if e["type"] == "meal":       end = start + timedelta(minutes=30)
+    elif e["type"] == "exercise": end = start + timedelta(minutes=45)
+    elif e["type"].startswith("sleep"): end = start + timedelta(hours=1.5)
+    elif e["type"] == "caffeine": end = start + timedelta(minutes=15)
+    else:                         end = start + timedelta(minutes=15)
+    events.append({
+        "start": start,
+        "end":   end,
+        "type":  e["type"],
+        "desc":  e["desc"]
+    })
+
+# 3) baseline and mutable current state
+BASELINE = {
+    "glucose_mg_dL":  90,   "lactate_mmol_L": 1.0,
+    "heart_rate_BPM": 65,   "skin_temp_C":    34.5,
+    "GSR_uS":         2.5
 }
+current_state = BASELINE.copy()
 
 historical_data = []
 
-def random_walk(value, min_val, max_val, step):
-    return max(min_val, min(max_val, value + random.uniform(-step, step)))
+def smooth(current, target, rate):
+    return current + (target - current)*rate
 
-def current_BAC():
-    elapsed_hours = (datetime.utcnow() - initial_drink_time).total_seconds() / 3600
-    metabolized_BAC = elapsed_hours * 0.015  # standard metabolism rate
-    return max(0, initial_BAC - metabolized_BAC)
+def apply_event_effects(state, event, minutes_since):
+    # only consider if within event window
+    if not (0 <= minutes_since <= (event["end"]-event["start"]).total_seconds()/60):
+        return
+    frac = minutes_since / ((event["end"]-event["start"]).total_seconds()/60)
+    if event["type"] == "meal":
+        # glycemic rise then fall: peak at mid‐meal
+        peak = BASELINE["glucose_mg_dL"] + 30
+        target = peak if frac < 0.5 else BASELINE["glucose_mg_dL"]
+        rate   = 0.2
+        state["glucose_mg_dL"] = smooth(state["glucose_mg_dL"], target, rate)
+    elif event["type"] == "exercise":
+        targetL = BASELINE["lactate_mmol_L"]+3
+        targetH = BASELINE["heart_rate_BPM"]+30
+        state["lactate_mmol_L"]   = smooth(state["lactate_mmol_L"],   targetL, 0.3)
+        state["heart_rate_BPM"]   = smooth(state["heart_rate_BPM"],   targetH, 0.3)
+    elif event["type"] == "sleep_deep":
+        state["heart_rate_BPM"] = smooth(state["heart_rate_BPM"],  55,   0.05)
+        state["GSR_uS"]         = smooth(state["GSR_uS"],          1.8,  0.05)
+    elif event["type"] == "sleep_rem":
+        state["heart_rate_BPM"] = smooth(state["heart_rate_BPM"],  60,   0.02)
+        state["skin_temp_C"]    = smooth(state["skin_temp_C"],     BASELINE["skin_temp_C"], 0.02)
+    elif event["type"] == "caffeine":
+        state["heart_rate_BPM"] = smooth(state["heart_rate_BPM"], BASELINE["heart_rate_BPM"]+10, 0.2)
 
-def generate_sensor_data(timestamp=None):
-    if not timestamp:
-        timestamp = datetime.utcnow().isoformat() + "Z"
+def decay_to_baseline(state):
+    for k,v in BASELINE.items():
+        state[k] = smooth(state[k], v, 0.01)
 
-    bac_now = current_BAC()
+def generate_sensor_point(dt: datetime):
+    global current_state
+    # 1) circadian
+    temp_mod, hr_mod = circadian_modulation(dt)
+    current_state["skin_temp_C"] = BASELINE["skin_temp_C"] + temp_mod
+    current_state["heart_rate_BPM"] = BASELINE["heart_rate_BPM"] + hr_mod
 
-    # Simulate realistic glucose recovery from alcohol-induced low
-    glucose_base = 95 if bac_now < 0.05 else 85  # glucose recovery post-alcohol
-    sensor_state["glucose_mg_dL"] = random_walk(glucose_base, 80, 110, 1.0)
+    # 2) decay + event effects
+    decay_to_baseline(current_state)
+    for ev in events:
+        mins = (dt - ev["start"]).total_seconds()/60
+        apply_event_effects(current_state, ev, mins)
 
-    sensor_state["lactate_mmol_L"] = random_walk(sensor_state["lactate_mmol_L"], 0.7, 1.5, 0.05)
-    sensor_state["ketones_mmol_L"] = random_walk(sensor_state["ketones_mmol_L"], 0.1, 0.3, 0.01)
-    sensor_state["proteins_g_dL"] = random_walk(sensor_state["proteins_g_dL"], 6.8, 7.3, 0.01)
-    sensor_state["urea_mg_dL"] = random_walk(sensor_state["urea_mg_dL"], 13, 17, 0.1)
-
-    # Heart rate gradually returns to normal after elevated drinking period
-    heart_rate_base = 68 if bac_now < 0.05 else 75
-    sensor_state["heart_rate_BPM"] = random_walk(heart_rate_base, 60, 80, 1.0)
-
-    sensor_state["skin_temp_C"] = random_walk(sensor_state["skin_temp_C"], 33.8, 35.0, 0.05)
-
-    # Environmental stable minor variations
-    sensor_state["ambient_temp_C"] = random_walk(sensor_state["ambient_temp_C"], 20, 24, 0.05)
-    sensor_state["humidity_pct"] = random_walk(sensor_state["humidity_pct"], 35, 45, 0.2)
-    sensor_state["pressure_hPa"] = random_walk(sensor_state["pressure_hPa"], 1008, 1018, 0.1)
-    
-    # GSR slowly normalizing
-    gsr_base = 3.0 if bac_now < 0.05 else 4.0
-    sensor_state["GSR_uS"] = random_walk(gsr_base, 2.5, 4.5, 0.05)
-
-    data = {
-        "timestamp": timestamp,
+    # 3) clamp + add tiny noise
+    out = {
+        "timestamp": dt.isoformat()+"Z",
         "biochemical": {
-            "glucose_mg_dL": round(sensor_state["glucose_mg_dL"], 1),
-            "lactate_mmol_L": round(sensor_state["lactate_mmol_L"], 2),
-            "ketones_mmol_L": round(sensor_state["ketones_mmol_L"], 2),
-            "proteins_g_dL": round(sensor_state["proteins_g_dL"], 2),
-            "alcohol_BAC_pct": round(bac_now, 4),
-            "urea_mg_dL": round(sensor_state["urea_mg_dL"], 1),
+            "glucose_mg_dL": round(max(70, min(150, current_state["glucose_mg_dL"] + random.uniform(-1,1))),1),
+            "lactate_mmol_L": round(max(0.5, min(5.0,  current_state["lactate_mmol_L"] + random.uniform(-0.1,0.1))),2),
         },
         "physiological": {
-            "heart_rate_BPM": round(sensor_state["heart_rate_BPM"], 1),
-            "skin_temp_C": round(sensor_state["skin_temp_C"], 2),
+            "heart_rate_BPM": round(max(45, min(120, current_state["heart_rate_BPM"] + random.uniform(-2,2))),1),
+            "skin_temp_C":    round(max(33, min(36.5, current_state["skin_temp_C"] + random.uniform(-0.2,0.2))),2),
         },
         "environmental": {
-            "ambient_temp_C": round(sensor_state["ambient_temp_C"], 2),
-            "humidity_pct": round(sensor_state["humidity_pct"], 1),
-            "pressure_hPa": round(sensor_state["pressure_hPa"], 1),
-            "GSR_uS": round(sensor_state["GSR_uS"], 2),
+            "GSR_uS":         round(max(1, min(6, current_state["GSR_uS"] + random.uniform(-0.1,0.1))),2),
         }
     }
-
-    return data
+    return out
 
 def generate_historical_data():
+    """Replays 24h in 5s steps, so live picks up seamlessly."""
     historical_data.clear()
-    time_point = datetime.utcnow() - timedelta(hours=24)
-    for _ in range(17280):  # 24 hours data, every 5 seconds
-        historical_data.append(generate_sensor_data(time_point.isoformat() + "Z"))
-        time_point += timedelta(seconds=5)
+    start = datetime.utcnow() - timedelta(hours=24)
+    t = start
+    while t <= datetime.utcnow():
+        historical_data.append(generate_sensor_point(t))
+        t += timedelta(seconds=5)
 
-generate_historical_data()
+def generate_live_data():
+    """Called every 5s for a new reading."""
+    return generate_sensor_point(datetime.utcnow())
