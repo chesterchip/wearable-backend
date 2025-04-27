@@ -1,78 +1,32 @@
 # sensors.py
+from datetime import datetime
 import random
-from datetime import datetime, timedelta
 
-# baseline values
-BASELINE = {
-    "glucose_mg_dL": 90,
-    "lactate_mmol_L": 1.0,
-    "heart_rate_BPM": 65,
-    "skin_temp_C": 34.5,
-    "GSR_uS": 2.5,
-}
-
-# stored history
-historical_data = []
-# persistent state
-current = BASELINE.copy()
-
-def smooth(val, target, rate):
-    return val + (target - val) * rate
-
-def decay_toward_baseline():
-    rates = {
-        "glucose_mg_dL": 0.002,
-        "lactate_mmol_L": 0.01,
-        "heart_rate_BPM": 0.01,
-        "skin_temp_C": 0.005,
-        "GSR_uS": 0.01,
+def generate_sensor_data():
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "galvanic_skin_response": round(random.uniform(1.0, 10.0), 2),
+        "air_quality": {"VOC": random.randint(100, 500), "CO2": random.randint(350, 1000)},
+        "uv_exposure": random.randint(0, 11),
+        "body_impedance": random.randint(300, 700),
+        "emg_activity": [round(random.uniform(0.1, 5.0), 1) for _ in range(3)],
+        "ecg_waveform": [round(random.uniform(-1.0, 1.0), 1) for _ in range(3)],
+        "magnetometer": {"x": round(random.uniform(-50, 50), 1), "y": round(random.uniform(-50, 50), 1), "z": round(random.uniform(-50, 50), 1)},
+        "gyroscope": {"x": round(random.uniform(-1, 1), 1), "y": round(random.uniform(-1, 1), 1), "z": round(random.uniform(-1, 1), 1)},
+        "accelerometer": {"x": round(random.uniform(-1, 1), 2), "y": round(random.uniform(-1, 1), 2), "z": round(random.uniform(-1, 1), 2)},
+        "basal_body_temp": round(random.uniform(35, 38), 1),
+        "urea_level": round(random.uniform(15, 45), 1),
+        "alcohol_level": round(random.uniform(0, 0.08), 4),
+        "total_proteins": round(random.uniform(6.0, 8.5), 1),
+        "lactate_level": round(random.uniform(0.5, 2.5), 1),
+        "ketone_bodies": round(random.uniform(0.0, 3.0), 1),
+        "glucose_level": round(random.uniform(70, 140), 1),
+        "electrodermal_activity": round(random.uniform(1.0, 10.0), 2),
+        "skin_conductance": round(random.uniform(1.0, 10.0), 2),
+        "blood_oxygen_saturation": round(random.uniform(90, 100), 1),
+        "blood_pressure": {"systolic": random.randint(110, 130), "diastolic": random.randint(70, 90)},
+        "skin_temperature": round(random.uniform(30, 36), 1),
+        "heart_rate": random.randint(50, 100)
     }
-    for k, base in BASELINE.items():
-        current[k] = smooth(current[k], base, rates[k])
 
-def generate_sensor_data(timestamp=None):
-    if not timestamp:
-        timestamp = datetime.utcnow()
-    else:
-        # parse iso string
-        timestamp = datetime.fromisoformat(timestamp.rstrip("Z"))
-
-    # apply slow decay
-    decay_toward_baseline()
-
-    # tiny random walk
-    for k in current:
-        step = {"glucose_mg_dL":1.0,"lactate_mmol_L":0.02,"heart_rate_BPM":1.0,
-                "skin_temp_C":0.02,"GSR_uS":0.05}[k]
-        current[k] += random.uniform(-step, step)
-        # clamp
-        if k == "glucose_mg_dL":
-            current[k] = max(70, min(150, current[k]))
-        if k == "lactate_mmol_L":
-            current[k] = max(0.5, min(5.0, current[k]))
-        if k == "heart_rate_BPM":
-            current[k] = max(45, min(120, current[k]))
-        if k == "skin_temp_C":
-            current[k] = max(33, min(37, current[k]))
-        if k == "GSR_uS":
-            current[k] = max(1.0, min(6.0, current[k]))
-
-    point = {
-        "timestamp": timestamp.isoformat() + "Z",
-        "sensor": {
-            "glucose":    round(current["glucose_mg_dL"], 1),
-            "lactate":    round(current["lactate_mmol_L"], 2),
-            "heart_rate": round(current["heart_rate_BPM"], 1),
-            "skin_temp":  round(current["skin_temp_C"], 2),
-            "gsr":        round(current["GSR_uS"], 2),
-        }
-    }
-    return point
-
-def generate_historical_data():
-    historical_data.clear()
-    # start 24h ago, step by 5s
-    t = datetime.utcnow() - timedelta(hours=24)
-    for _ in range(17280):
-        historical_data.append(generate_sensor_data(t.isoformat()+"Z"))
-        t += timedelta(seconds=5)
+historical_sensor_data = [generate_sensor_data() for _ in range(1440)]
