@@ -1,49 +1,52 @@
-# events.py
 from datetime import datetime, timedelta
 
-now = datetime.utcnow()
-# relative offsets for demo
-events = [
+daily_events = [
     {
-      "desc": "Breakfast",
-      "category": "Eating & Drinking",
-      "color": "#4caf50",
-      "start": (now - timedelta(hours=22)).isoformat()+"Z",
-      "end":   (now - timedelta(hours=21, minutes=30)).isoformat()+"Z",
+        "type": "sleep",
+        "start_time": "2025-04-26T23:00:00",
+        "end_time": "2025-04-27T07:00:00",
+        "details": {}
     },
     {
-      "desc": "Morning Run",
-      "category": "Exercise",
-      "color": "#ff9800",
-      "start": (now - timedelta(hours=18)).isoformat()+"Z",
-      "end":   (now - timedelta(hours=17, minutes=30)).isoformat()+"Z",
+        "type": "meal",
+        "start_time": "2025-04-27T07:30:00",
+        "end_time": "2025-04-27T07:45:00",
+        "details": {
+            "description": "Breakfast - eggs, avocado toast, coffee",
+            "nutrients": {"protein_g": 20, "carbs_g": 25, "fat_g": 15, "caffeine_mg": 80}
+        }
     },
     {
-      "desc": "Coffee",
-      "category": "Caffeine",
-      "color": "#795548",
-      "start": (now - timedelta(hours=16)).isoformat()+"Z",
-      "end":   (now - timedelta(hours=15, minutes=50)).isoformat()+"Z",
+        "type": "exercise",
+        "start_time": "2025-04-27T09:00:00",
+        "end_time": "2025-04-27T10:00:00",
+        "details": {
+            "activity": "Running",
+            "intensity": "Moderate",
+            "calories_burned": 500
+        }
     },
     {
-      "desc": "Lunch",
-      "category": "Eating & Drinking",
-      "color": "#f44336",
-      "start": (now - timedelta(hours=12)).isoformat()+"Z",
-      "end":   (now - timedelta(hours=11, minutes=30)).isoformat()+"Z",
+        "type": "meal",
+        "start_time": "2025-04-27T12:30:00",
+        "end_time": "2025-04-27T13:00:00",
+        "details": {
+            "description": "Lunch - chicken salad, water",
+            "nutrients": {"protein_g": 35, "carbs_g": 10, "fat_g": 8, "caffeine_mg": 0}
+        }
     },
     {
-      "desc": "Afternoon Gym",
-      "category": "Exercise",
-      "color": "#9c27b0",
-      "start": (now - timedelta(hours=8)).isoformat()+"Z",
-      "end":   (now - timedelta(hours=7, minutes=0)).isoformat()+"Z",
+        "type": "hydration",
+        "time": "2025-04-27T15:00:00",
+        "details": {"volume_ml": 300}
     },
     {
-      "desc": "Night Sleep",
-      "category": "Sleep",
-      "color": "#3f51b5",
-      "start": (now - timedelta(hours=2)).isoformat()+"Z",
-      "end":   (now + timedelta(hours=6)).isoformat()+"Z",
+        "type": "meal",
+        "start_time": "2025-04-27T19:00:00",
+        "end_time": "2025-04-27T19:30:00",
+        "details": {
+            "description": "Dinner - salmon, quinoa, vegetables",
+            "nutrients": {"protein_g": 40, "carbs_g": 30, "fat_g": 20, "caffeine_mg": 0}
+        }
     }
 ]
